@@ -1,13 +1,13 @@
 # Vera Challenge Bot
 
-AI merchant assistant for the magicpin AI Challenge — consumes category, merchant, trigger, and customer contexts to compose contextual WhatsApp messages.
+AI merchant assistant for the magicpin AI Challengen- consumes category, merchant, trigger, and customer contexts to compose contextual WhatsApp messages.
 
 ## Approach
 
-* **Trigger-routed template composer** — each `trigger.kind` has a dedicated handler that extracts verifiable facts from available contexts (numbers, dates, citations, peer stats, offers).
-* **Deterministic by default** — no LLM required for submission; identical inputs always produce consistent outputs.
-* **Optional LLM mode** — supports LLM-backed composition using `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `GROQ_API_KEY` when `COMPOSER_MODE=llm`.
-* **Multi-turn handlers** — includes auto-reply detection (exit after repeated canned replies), immediate action after merchant commitment, and graceful handling of hostile responses.
+* **Trigger-routed template composer** - each `trigger.kind` has a dedicated handler that extracts verifiable facts from available contexts (numbers, dates, citations, peer stats, offers).
+* **Deterministic by default** - no LLM required for submission; identical inputs always produce consistent outputs.
+* **Optional LLM mode** - supports LLM-backed composition using `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `GROQ_API_KEY` when `COMPOSER_MODE=llm`.
+* **Multi-turn handlers** - includes auto-reply detection (exit after repeated canned replies), immediate action after merchant commitment, and graceful handling of hostile responses.
 
 ## Tradeoffs
 
