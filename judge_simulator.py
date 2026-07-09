@@ -27,7 +27,7 @@ load_env_file()
 # =============================================================================
 
 # Your bot's URL (where your bot is running)
-BOT_URL = os.getenv("BOT_URL", "http://localhost:8080")
+BOT_URL = "https://magicpin-ai-challenge-67jm.onrender.com"
 
 # Choose your LLM provider: "openai", "anthropic", "gemini", "deepseek", "groq", "ollama", "openrouter"
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq")
