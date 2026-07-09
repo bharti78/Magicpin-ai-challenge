@@ -51,24 +51,24 @@ For every active trigger:
 
             FastAPI Application
 
-    +-------------------------------+
-    |                               |
-    v                               v
+    +--------------------------------------+
+    |                                      |
+    v                                      v
 
-Context Store                 Conversation Store
+Context Store                    Conversation State Handler
 
-(category, merchant,          Multi-turn history
+(category, merchant,             Runtime conversation state
 customer, trigger)
 
-          |
-          v
+                 |
+                 v
 
-     Composer Engine
+          Composer Engine
 
-          |
-          v
+                 |
+                 v
 
-      Vera Messages
+            Vera Messages
 ```
 
 ---
@@ -90,7 +90,7 @@ Supported contexts:
 
 - Version-based updates
 - Duplicate context handling
-- Persistent in-memory context storage
+- Stateful in-memory context storage during runtime
 
 ---
 
@@ -172,7 +172,7 @@ Detects repeated WhatsApp automated responses and avoids unnecessary continuatio
 
 ## Merchant Commitment
 
-When the merchant shows positive intent (e.g., "Okay let's do it"), the bot proceeds toward the next action instead of asking redundant questions.
+When the merchant shows positive intent (for example, "Okay let's do it"), the bot proceeds toward the next action instead of asking redundant questions.
 
 ## Negative Responses
 
@@ -193,6 +193,8 @@ The bot was tested using the provided:
 ```bash
 judge_simulator.py
 ```
+
+The bot was validated against the provided judge simulator to verify API contract compatibility and conversation handling.
 
 Run locally:
 
@@ -221,7 +223,7 @@ Testing covers:
 
 The bot is deployed as a public HTTPS FastAPI service.
 
-### Base URL
+## Base URL
 
 ```
 https://magicpin-ai-challenge-67jm.onrender.com
@@ -250,17 +252,17 @@ Judge endpoints:
 
 ## Limitations
 
-- Less variation compared to fully LLM-generated responses
+- Less variation compared to fully template-driven conversational systems
 - Requires maintaining templates and conversation handlers
 
 ---
 
 # Future Improvements
 
-- Hybrid LLM + deterministic generation
 - Improved retrieval over context libraries
 - More category-specific conversation strategies
 - Long-term conversation memory
+- Enhanced trigger prioritization and response personalization
 
 ---
 
