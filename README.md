@@ -1,108 +1,274 @@
 # Vera Challenge Bot
 
-AI merchant assistant for the magicpin AI Challengen- consumes category, merchant, trigger, and customer contexts to compose contextual WhatsApp messages.
+AI merchant assistant developed for the magicpin AI Challenge.
 
-## Approach
+The bot generates contextual WhatsApp conversations using the four-context framework:
 
-* **Trigger-routed template composer** - each `trigger.kind` has a dedicated handler that extracts verifiable facts from available contexts (numbers, dates, citations, peer stats, offers).
-* **Deterministic by default** - no LLM required for submission; identical inputs always produce consistent outputs.
-* **Optional LLM mode** - supports LLM-backed composition using `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `GROQ_API_KEY` when `COMPOSER_MODE=llm`.
-* **Multi-turn handlers** - includes auto-reply detection (exit after repeated canned replies), immediate action after merchant commitment, and graceful handling of hostile responses.
+- Category context
+- Merchant context
+- Customer context
+- Trigger context
 
-## Tradeoffs
+The bot exposes the required HTTP APIs consumed by the magicpin Judge Harness.
 
-* Templates score well on specificity and avoid hallucination, but provide less variation compared to a fully generative LLM approach.
-* Missing trigger payload data falls back to available merchant/category/customer context instead of inventing information.
-* Hindi-English code-mix is applied when merchant language preferences include `hi` or customer preference indicates `hi-en mix`.
+---
 
-## What Would Help Most
+# Approach
 
-* Real-time booking slot availability for appointment-related triggers.
-* Richer conversation history signals for smarter re-engagement.
-* Category-specific curiosity-driven question banks based on locality and merchant behavior.
+## Trigger Routed Context Composer
 
-## Deployment
+The bot follows a deterministic composition approach.
 
-The bot is deployed as a FastAPI service and exposes the following endpoints:
+For every active trigger:
 
-| Endpoint       | Method | Purpose                                               |
-| -------------- | ------ | ----------------------------------------------------- |
-| `/v1/healthz`  | GET    | Health check                                          |
-| `/v1/metadata` | GET    | Bot metadata                                          |
-| `/v1/context`  | POST   | Push category, merchant, trigger, or customer context |
-| `/v1/tick`     | POST   | Process available triggers                            |
-| `/v1/reply`    | POST   | Handle merchant conversations                         |
-| `/v1/teardown` | POST   | Reset in-memory state                                 |
+1. Fetch relevant trigger context
+2. Identify merchant/customer context
+3. Retrieve category information
+4. Extract only verified facts
+5. Generate a contextual Vera message
 
-## Run Locally
+## Design Principles
 
-Install dependencies:
+- Deterministic output by default
+- No hallucinated information
+- Low latency responses
+- Context-aware message generation
+- Stateful conversation handling
 
-```bash
-pip install -r requirements.txt
+---
+
+# Architecture
+
+```text
+          Magicpin Judge Harness
+
+                   |
+                   |
+             HTTP JSON API
+
+                   |
+                   v
+
+            FastAPI Application
+
+    +-------------------------------+
+    |                               |
+    v                               v
+
+Context Store                 Conversation Store
+
+(category, merchant,          Multi-turn history
+customer, trigger)
+
+          |
+          v
+
+     Composer Engine
+
+          |
+          v
+
+      Vera Messages
 ```
 
-Generate submission messages:
+---
 
-```bash
-python generate_submission.py
+# Implemented APIs
+
+## POST `/v1/context`
+
+Receives context updates from the judge.
+
+Supported contexts:
+
+- category
+- merchant
+- customer
+- trigger
+
+### Features
+
+- Version-based updates
+- Duplicate context handling
+- Persistent in-memory context storage
+
+---
+
+## POST `/v1/tick`
+
+Called periodically by the judge.
+
+The bot:
+
+- Checks available triggers
+- Finds related contexts
+- Decides whether to send a proactive message
+- Returns generated actions
+
+Example:
+
+```json
+{
+  "actions": []
+}
 ```
 
-Run the FastAPI server:
+---
+
+## POST `/v1/reply`
+
+Handles merchant/customer replies.
+
+Supports:
+
+- Follow-up conversations
+- Acceptance handling
+- Rejection handling
+- Graceful exits
+- Wait decisions
+
+---
+
+## GET `/v1/healthz`
+
+Health monitoring endpoint.
+
+Returns:
+
+- Server status
+- Uptime
+- Loaded context counts
+
+Example:
+
+```json
+{
+  "status": "ok",
+  "uptime_seconds": 100,
+  "contexts_loaded": {
+    "category": 5,
+    "merchant": 50,
+    "customer": 200,
+    "trigger": 0
+  }
+}
+```
+
+---
+
+## GET `/v1/metadata`
+
+Returns bot identity and implementation details.
+
+---
+
+# Conversation Handling
+
+Implemented handlers for:
+
+## Auto Reply Detection
+
+Detects repeated WhatsApp automated responses and avoids unnecessary continuation.
+
+## Merchant Commitment
+
+When the merchant shows positive intent (e.g., "Okay let's do it"), the bot proceeds toward the next action instead of asking redundant questions.
+
+## Negative Responses
+
+Handles:
+
+- Rejection
+- Hostility
+- Irrelevant queries
+
+with polite exits.
+
+---
+
+# Testing
+
+The bot was tested using the provided:
+
+```bash
+judge_simulator.py
+```
+
+Run locally:
 
 ```bash
 uvicorn bot:app --host 0.0.0.0 --port 8080
 ```
 
-## Files
-
-| File                       | Purpose                                       |
-| -------------------------- | --------------------------------------------- |
-| `bot.py`                   | FastAPI server + `compose()` export           |
-| `composer.py`              | Core trigger-based message composition engine |
-| `conversation_handlers.py` | Multi-turn conversation routing               |
-| `context_utils.py`         | Context extraction and helper utilities       |
-| `generate_submission.py`   | Generates evaluated test messages             |
-| `submission.jsonl`         | Generated 30-line submission output           |
-
-## Optional LLM Mode
-
-Enable LLM-backed composition:
-
-### Windows PowerShell
-
-```powershell
-$env:COMPOSER_MODE="llm"
-$env:GEMINI_API_KEY="your-key"
-```
-
-or:
-
-```powershell
-$env:COMPOSER_MODE="llm"
-$env:OPENAI_API_KEY="your-key"
-```
-
-or:
-
-```powershell
-$env:COMPOSER_MODE="llm"
-$env:GROQ_API_KEY="your-key"
-```
-
-Then run:
+Run simulator:
 
 ```bash
-python generate_submission.py
+python judge_simulator.py
 ```
 
-## Design Notes
+Testing covers:
 
-The bot keeps the core composition deterministic to ensure:
+- Context ingestion
+- Health checks
+- Trigger processing
+- Message generation
+- Conversation replies
+- API contract validation
 
-* reproducible outputs,
-* no hallucinated merchant claims,
-* reliable multi-turn behavior,
-* predictable evaluation results.
+---
 
-The architecture can be extended with external storage and richer real-time signals for production-scale deployments.
+# Deployment
+
+The bot is deployed as a public HTTPS FastAPI service.
+
+### Base URL
+
+```
+https://magicpin-ai-challenge-67jm.onrender.com
+```
+
+Judge endpoints:
+
+```
+/v1/context
+/v1/tick
+/v1/reply
+/v1/healthz
+/v1/metadata
+```
+
+---
+
+# Tradeoffs
+
+## Advantages
+
+- Fast deterministic responses
+- Reduced hallucination risk
+- Easy debugging
+- Stable evaluation behavior
+
+## Limitations
+
+- Less variation compared to fully LLM-generated responses
+- Requires maintaining templates and conversation handlers
+
+---
+
+# Future Improvements
+
+- Hybrid LLM + deterministic generation
+- Improved retrieval over context libraries
+- More category-specific conversation strategies
+- Long-term conversation memory
+
+---
+
+# Tech Stack
+
+- Python
+- FastAPI
+- Pydantic
+- JSON Context Storage
+- Rule-based Composer Engine
+- Conversation State Management
