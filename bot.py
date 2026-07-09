@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from datetime import datetime
@@ -20,6 +21,13 @@ contexts: dict[tuple[str, str], dict] = {}
 conversations: dict[str, ConversationState] = {}
 suppression_sent: set[str] = set()
 active_conversations: set[str] = set()
+
+
+def _server_port() -> int:
+    try:
+        return int(os.environ.get("PORT", 8080))
+    except ValueError:
+        return 8080
 
 
 def compose(
@@ -237,3 +245,13 @@ async def teardown():
     active_conversations.clear()
     reset_merchant_tracking()
     return {"status": "wiped"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "bot:app",
+        host="0.0.0.0",
+        port=_server_port(),
+    )
