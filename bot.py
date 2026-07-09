@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 import uuid
 from datetime import datetime
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 
 from composer import compose as compose_message
@@ -16,6 +19,7 @@ from conversation_handlers import ConversationState, reset_merchant_tracking, re
 
 app = FastAPI(title="Vera Challenge Bot")
 START = time.time()
+logger = logging.getLogger("uvicorn.error")
 
 contexts: dict[tuple[str, str], dict] = {}
 conversations: dict[str, ConversationState] = {}
@@ -101,16 +105,59 @@ class CtxBody(BaseModel):
     delivered_at: str
 
 
+@app.exception_handler(RequestValidationError)
+async def log_validation_exception(request: Request, exc: RequestValidationError):
+    if request.url.path == "/v1/context":
+        try:
+            raw = await request.json()
+        except Exception:
+            raw = {}
+        payload = raw.get("payload") if isinstance(raw, dict) else None
+        payload_keys = sorted(payload.keys()) if isinstance(payload, dict) else []
+        logger.warning(
+            "context validation failed: scope=%s context_id=%s payload_keys=%s errors=%s",
+            raw.get("scope") if isinstance(raw, dict) else None,
+            raw.get("context_id") if isinstance(raw, dict) else None,
+            payload_keys,
+            exc.errors(),
+        )
+    return await request_validation_exception_handler(request, exc)
+
+
 @app.post("/v1/context")
 async def push_context(body: CtxBody):
+    logger.info(
+        "context incoming: scope=%s context_id=%s payload_keys=%s",
+        body.scope,
+        body.context_id,
+        sorted(body.payload.keys()),
+    )
     if body.scope not in {"category", "merchant", "customer", "trigger"}:
+        logger.warning(
+            "context rejected: reason=invalid_scope scope=%s context_id=%s",
+            body.scope,
+            body.context_id,
+        )
         return {"accepted": False, "reason": "invalid_scope", "details": body.scope}
 
     key = (body.scope, body.context_id)
     cur = contexts.get(key)
     if cur and cur["version"] > body.version:
+        logger.warning(
+            "context rejected: reason=stale_version scope=%s context_id=%s incoming_version=%s current_version=%s",
+            body.scope,
+            body.context_id,
+            body.version,
+            cur["version"],
+        )
         return {"accepted": False, "reason": "stale_version", "current_version": cur["version"]}
     if cur and cur["version"] == body.version:
+        logger.info(
+            "context accepted: reason=duplicate_version scope=%s context_id=%s version=%s",
+            body.scope,
+            body.context_id,
+            body.version,
+        )
         return {
             "accepted": True,
             "ack_id": f"ack_{body.context_id}_v{body.version}",
@@ -118,6 +165,12 @@ async def push_context(body: CtxBody):
         }
 
     contexts[key] = {"version": body.version, "payload": body.payload}
+    logger.info(
+        "context accepted: reason=stored scope=%s context_id=%s version=%s",
+        body.scope,
+        body.context_id,
+        body.version,
+    )
     return {
         "accepted": True,
         "ack_id": f"ack_{body.context_id}_v{body.version}",
