@@ -271,8 +271,9 @@ async def reply(body: ReplyBody):
         conversations[body.conversation_id] = state
 
     result = respond(state, body.message)
-
+    print("DEBUG RESULT:", result)
     if result.get("action") == "send":
+        print("DEBUG SEND BODY:", result["body"])
         body_text = result.get("body", "")
         if body_text in state.sent_bodies:
             result = {
