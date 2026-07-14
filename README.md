@@ -198,14 +198,37 @@ The bot was validated against the provided judge simulator to verify API contrac
 
 Run locally:
 
-```bash
-uvicorn bot:app --host 0.0.0.0 --port 8080
+```powershell
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
+.\venv\Scripts\python.exe -m uvicorn bot:app --host 127.0.0.1 --port 8080
+```
+
+Local base URL:
+
+```text
+http://localhost:8080
+```
+
+Local endpoints:
+
+```text
+http://localhost:8080/v1/context
+http://localhost:8080/v1/tick
+http://localhost:8080/v1/reply
+http://localhost:8080/v1/healthz
+http://localhost:8080/v1/metadata
+```
+
+Health check:
+
+```powershell
+curl http://localhost:8080/v1/healthz
 ```
 
 Run simulator:
 
-```bash
-python judge_simulator.py
+```powershell
+.\venv\Scripts\python.exe judge_simulator.py
 ```
 
 Testing covers:
@@ -221,7 +244,23 @@ Testing covers:
 
 # Deployment
 
-The bot is deployed as a public HTTPS FastAPI service.
+The bot can run locally for testing and is also deployed as a public HTTPS FastAPI service.
+
+## Local Base URL
+
+```
+http://localhost:8080
+```
+
+Local judge endpoints:
+
+```
+/v1/context
+/v1/tick
+/v1/reply
+/v1/healthz
+/v1/metadata
+```
 
 ## Base URL
 
