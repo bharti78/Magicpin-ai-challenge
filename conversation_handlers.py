@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import os
 import re
+import logging
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger("uvicorn.error")
 
 AUTO_REPLY_PATTERNS = [
     r"thank you for contacting",
@@ -78,7 +82,20 @@ def is_not_interested(message: str) -> bool:
     return _matches(message, NOT_INTERESTED)
 
 
-def respond(state: ConversationState, merchant_message: str) -> dict:
+def _llm_enabled() -> bool:
+    mode = os.getenv("REPLY_MODE", os.getenv("COMPOSER_MODE", "template")).lower()
+    has_key = bool(os.getenv("GROQ_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("OPENAI_API_KEY"))
+    return mode == "llm" and has_key
+
+
+def respond(
+    state: ConversationState,
+    merchant_message: str,
+    category: dict | None = None,
+    merchant: dict | None = None,
+    trigger: dict | None = None,
+    customer: dict | None = None,
+) -> dict:
     """Produce the next bot action given conversation state and inbound message."""
     if state.ended:
         return {"action": "end", "rationale": "Conversation already ended"}
@@ -128,6 +145,18 @@ def respond(state: ConversationState, merchant_message: str) -> dict:
             "cta": "open_ended",
             "rationale": "Auto-reply detected — one human check before exit",
         }
+
+    if _llm_enabled():
+        try:
+            from llm_client import compose_reply_with_llm
+
+            result = compose_reply_with_llm(state, merchant_message, category, merchant, trigger, customer)
+            if result.get("action") == "send" and not result.get("body"):
+                raise ValueError("LLM reply missing body")
+            return result
+        except Exception as exc:
+            logger.warning("LLM reply failed; using deterministic fallback: %s", exc)
+            pass
 
     if is_commitment(merchant_message):
         if state.last_bot_body:

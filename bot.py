@@ -20,6 +20,8 @@ from conversation_handlers import ConversationState, reset_merchant_tracking, re
 app = FastAPI(title="Vera Challenge Bot")
 START = time.time()
 logger = logging.getLogger("uvicorn.error")
+TICK_TIME_BUDGET_SECONDS = 24.0
+MAX_ACTIONS_PER_TICK = 20
 
 contexts: dict[tuple[str, str], dict] = {}
 conversations: dict[str, ConversationState] = {}
@@ -71,6 +73,16 @@ def _template_name(trigger: dict, send_as: str) -> str:
     return f"{prefix}_{kind}_v1"
 
 
+def _model_name() -> str:
+    if os.getenv("GROQ_API_KEY"):
+        return os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    if os.getenv("GEMINI_API_KEY"):
+        return os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    if os.getenv("OPENAI_API_KEY"):
+        return os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    return "template-composer-v1"
+
+
 @app.get("/v1/healthz")
 async def healthz():
     counts = {"category": 0, "merchant": 0, "customer": 0, "trigger": 0}
@@ -89,8 +101,8 @@ async def metadata():
     return {
         "team_name": "Vera Challenge",
         "team_members": ["Participant"],
-        "model": "template-composer-v1",
-        "approach": "Trigger-routed deterministic composer with multi-turn reply handlers",
+        "model": _model_name(),
+        "approach": "Hybrid Vera bot: deterministic guardrails and fallbacks with optional LLM compose/reply for context-aware WhatsApp conversations",
         "contact_email": "team@example.com",
         "version": "1.0.0",
         "submitted_at": datetime.utcnow().isoformat() + "Z",
@@ -102,7 +114,7 @@ class CtxBody(BaseModel):
     context_id: str
     version: int
     payload: dict[str, Any]
-    delivered_at: str
+    delivered_at: str | None = None
 
 
 @app.exception_handler(RequestValidationError)
@@ -185,6 +197,7 @@ class TickBody(BaseModel):
 
 @app.post("/v1/tick")
 async def tick(body: TickBody):
+    tick_started = time.time()
     actions = []
     ranked: list[tuple[int, str]] = []
 
@@ -203,7 +216,11 @@ async def tick(body: TickBody):
 
     ranked.sort(key=lambda x: -x[0])
 
-    for _, trg_id in ranked[:20]:
+    for _, trg_id in ranked[:MAX_ACTIONS_PER_TICK]:
+        if time.time() - tick_started > TICK_TIME_BUDGET_SECONDS:
+            logger.warning("tick time budget exceeded; returning %s partial actions", len(actions))
+            break
+
         trg = _get_context("trigger", trg_id)
         if not trg:
             continue
@@ -225,6 +242,7 @@ async def tick(body: TickBody):
         )
         state.last_bot_body = composed["body"]
         state.sent_bodies.append(composed["body"])
+        state.turns.append({"from": "vera", "body": composed["body"]})
         conversations[conv_id] = state
         active_conversations.add(f"conv_{trg.get('merchant_id')}_{trg_id}")
         suppression_sent.add(sk)
@@ -255,8 +273,8 @@ class ReplyBody(BaseModel):
     customer_id: str | None = None
     from_role: str
     message: str
-    received_at: str
-    turn_number: int
+    received_at: str | None = None
+    turn_number: int | None = None
 
 
 @app.post("/v1/reply")
@@ -270,7 +288,16 @@ async def reply(body: ReplyBody):
         )
         conversations[body.conversation_id] = state
 
-    result = respond(state, body.message)
+    merchant = _get_context("merchant", state.merchant_id) if state.merchant_id else None
+    customer = _get_context("customer", state.customer_id) if state.customer_id else None
+    trigger = _get_context("trigger", state.trigger_id) if state.trigger_id else None
+    category = None
+    if merchant:
+        category = _get_context("category", merchant.get("category_slug", ""))
+    if not category and trigger:
+        category, merchant, trigger, customer = _resolve_contexts(trigger)
+
+    result = respond(state, body.message, category, merchant, trigger, customer)
     if result.get("action") == "send":
         body_text = result.get("body", "")
         if body_text in state.sent_bodies:

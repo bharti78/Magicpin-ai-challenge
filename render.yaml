@@ -6,4 +6,8 @@ services:
     startCommand: uvicorn bot:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: COMPOSER_MODE
-        value: template
+        value: llm
+      - key: REPLY_MODE
+        value: llm
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
