@@ -1,307 +1,263 @@
 # Vera Challenge Bot
 
-AI merchant assistant developed for the magicpin AI Challenge.
+AI WhatsApp assistant for the magicpin AI Challenge.
 
-The bot generates contextual WhatsApp conversations using the four-context framework:
+Vera generates context-aware merchant/customer conversations from the four-context framework:
 
 - Category context
 - Merchant context
 - Customer context
 - Trigger context
 
-The bot exposes the required HTTP APIs consumed by the magicpin Judge Harness.
+The service exposes the HTTP API expected by the judge harness and keeps runtime state in memory, as allowed by the challenge.
 
 ---
 
 # Approach
 
-## Trigger Routed Context Composer
+## Hybrid Vera Bot
 
-The bot follows a deterministic composition approach.
+The bot uses a hybrid architecture:
 
-For every active trigger:
+- Deterministic trigger-specific composer for stable first messages
+- Optional LLM-backed composer/reply engine for richer context-aware conversations
+- Hard guardrails for stop requests, auto-replies, repeated messages, and API failures
+- Deterministic fallback whenever the LLM is unavailable or returns invalid output
 
-1. Fetch relevant trigger context
-2. Identify merchant/customer context
-3. Retrieve category information
-4. Extract only verified facts
-5. Generate a contextual Vera message
+This gives the bot the scoring potential of an LLM system while keeping it robust under judge timeouts and edge cases.
 
-## Design Principles
+## Message Principles
 
-- Deterministic output by default
-- No hallucinated information
-- Low latency responses
-- Context-aware message generation
-- Stateful conversation handling
+- Use only verified facts from provided context
+- Never invent offers, competitors, numbers, or claims
+- Match category tone:
+  - Dentists/doctors: clinical and peer-to-peer
+  - Salons: warm and practical
+  - Restaurants: operator-to-operator
+  - Gyms: coaching-oriented
+  - Pharmacies: precise and trustworthy
+- Keep one CTA at the end
+- Avoid repeated message bodies within a conversation
+- End politely on stop, hostility, or clear disinterest
+- Handle WhatsApp Business auto-replies without looping
 
 ---
 
 # Architecture
 
 ```text
-          Magicpin Judge Harness
-
-                   |
-                   |
-             HTTP JSON API
-
-                   |
-                   v
-
-            FastAPI Application
-
-    +--------------------------------------+
-    |                                      |
-    v                                      v
-
-Context Store                    Conversation State Handler
-
-(category, merchant,             Runtime conversation state
-customer, trigger)
-
-                 |
-                 v
-
-          Composer Engine
-
-                 |
-                 v
-
-            Vera Messages
+Magicpin Judge Harness
+        |
+        v
+FastAPI HTTP API
+        |
+        +--> In-memory context store
+        |       (category, merchant, customer, trigger)
+        |
+        +--> Tick composer
+        |       deterministic handlers + optional LLM
+        |
+        +--> Reply handler
+                guardrails + optional LLM + fallback
 ```
+
+Core files:
+
+- `bot.py` - FastAPI server and API contract
+- `composer.py` - deterministic trigger-routed first-message composer
+- `conversation_handlers.py` - multi-turn reply state and guardrails
+- `llm_client.py` - optional Groq/Gemini/OpenAI LLM integration
+- `judge_simulator.py` - local judge simulation
 
 ---
 
 # Implemented APIs
 
-## POST `/v1/context`
+## `GET /v1/healthz`
 
-Receives context updates from the judge.
+Returns service health, uptime, and loaded context counts.
 
-Supported contexts:
+## `GET /v1/metadata`
 
-- category
-- merchant
-- customer
-- trigger
+Returns team identity, active model, approach, and version metadata.
 
-### Features
+## `POST /v1/context`
 
-- Version-based updates
-- Duplicate context handling
-- Stateful in-memory context storage during runtime
+Stores category, merchant, customer, and trigger context.
 
----
+Features:
 
-## POST `/v1/tick`
+- Version-aware updates
+- Duplicate-version acceptance
+- Invalid-scope rejection
+- In-memory storage
 
-Called periodically by the judge.
+## `POST /v1/tick`
 
-The bot:
+Called by the judge to ask whether Vera wants to send proactive messages.
 
-- Checks available triggers
-- Finds related contexts
-- Decides whether to send a proactive message
-- Returns generated actions
+Features:
 
-Example:
+- Trigger prioritization by urgency
+- Suppression-key tracking
+- Active-conversation tracking
+- Maximum 20 actions per tick
+- 24-second time budget to avoid judge timeout
+- Partial action return if time budget is close
 
-```json
-{
-  "actions": []
-}
-```
-
----
-
-## POST `/v1/reply`
+## `POST /v1/reply`
 
 Handles merchant/customer replies.
 
-Supports:
+Features:
 
-- Follow-up conversations
-- Acceptance handling
-- Rejection handling
-- Graceful exits
-- Wait decisions
+- Commitment transition: moves to action mode on “yes”, “ok”, “let’s do it”, “what next”
+- Auto-reply detection: sends one human-check nudge, then exits on repeat
+- Hostile/stop handling: ends immediately and politely
+- Wait handling when merchant asks for time
+- No verbatim repeated Vera messages
+- Optional LLM reply generation with deterministic fallback
 
 ---
 
-## GET `/v1/healthz`
+# LLM Mode
 
-Health monitoring endpoint.
+The bot supports optional LLM mode. Groq is preferred when configured.
 
-Returns:
+Supported providers:
 
-- Server status
-- Uptime
-- Loaded context counts
+- Groq
+- Gemini
+- OpenAI
 
-Example:
+Recommended environment:
 
-```json
-{
-  "status": "ok",
-  "uptime_seconds": 100,
-  "contexts_loaded": {
-    "category": 5,
-    "merchant": 50,
-    "customer": 200,
-    "trigger": 0
-  }
-}
+```env
+COMPOSER_MODE=llm
+REPLY_MODE=llm
+GROQ_API_KEY=your_groq_key_here
+GROQ_MODEL=llama-3.3-70b-versatile
 ```
 
----
+If no LLM key is configured, the bot still works using deterministic templates and reply handlers.
 
-## GET `/v1/metadata`
-
-Returns bot identity and implementation details.
+Do not commit real API keys to GitHub. Set production secrets in the Render dashboard.
 
 ---
 
-# Conversation Handling
+# Local Run
 
-Implemented handlers for:
-
-## Auto Reply Detection
-
-Detects repeated WhatsApp automated responses and avoids unnecessary continuation.
-
-## Merchant Commitment
-
-When the merchant shows positive intent (for example, "Okay let's do it"), the bot proceeds toward the next action instead of asking redundant questions.
-
-## Negative Responses
-
-Handles:
-
-- Rejection
-- Hostility
-- Irrelevant queries
-
-with polite exits.
-
----
-
-# Testing
-
-The bot was tested using the provided:
-
-```bash
-judge_simulator.py
-```
-
-The bot was validated against the provided judge simulator to verify API contract compatibility and conversation handling.
-
-Run locally:
+Install dependencies:
 
 ```powershell
+cd E:\Downloads\magicpin-ai-challenge
 .\venv\Scripts\python.exe -m pip install -r requirements.txt
-.\venv\Scripts\python.exe -m uvicorn bot:app --host 127.0.0.1 --port 8080
 ```
 
-Local base URL:
+Start the server:
 
-```text
-http://localhost:8080
-```
-
-Local endpoints:
-
-```text
-http://localhost:8080/v1/context
-http://localhost:8080/v1/tick
-http://localhost:8080/v1/reply
-http://localhost:8080/v1/healthz
-http://localhost:8080/v1/metadata
+```powershell
+.\venv\Scripts\python.exe -m uvicorn bot:app --host 0.0.0.0 --port 8080
 ```
 
 Health check:
 
 ```powershell
-curl http://localhost:8080/v1/healthz
+Invoke-RestMethod "http://localhost:8080/v1/healthz"
 ```
 
-Run simulator:
+Run the judge simulator in another PowerShell window:
 
 ```powershell
 .\venv\Scripts\python.exe judge_simulator.py
 ```
 
-Testing covers:
+Expected local judge checks:
 
-- Context ingestion
-- Health checks
-- Trigger processing
-- Message generation
-- Conversation replies
-- API contract validation
+```text
+[PASS] warmup
+[PASS] auto_reply
+[PASS] intent
+[PASS] hostile
+```
+
+---
+
+# Example Reply Test
+
+```powershell
+$body = @{
+  conversation_id = "conv_test_001"
+  merchant_id = "m_001_drmeera_dentist_delhi"
+  customer_id = $null
+  from_role = "merchant"
+  message = "Ok lets do it. What is next?"
+  received_at = "2026-07-17T10:40:00Z"
+  turn_number = 2
+} | ConvertTo-Json -Compress
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "http://localhost:8080/v1/reply" `
+  -ContentType "application/json" `
+  -Body $body
+```
 
 ---
 
 # Deployment
 
-The bot can run locally for testing and is also deployed as a public HTTPS FastAPI service.
+The bot is deployable as a Render web service.
 
-## Local Base URL
+Current public base URL:
 
-```
-http://localhost:8080
-```
-
-Local judge endpoints:
-
-```
-/v1/context
-/v1/tick
-/v1/reply
-/v1/healthz
-/v1/metadata
-```
-
-## Base URL
-
-```
+```text
 https://magicpin-ai-challenge-67jm.onrender.com
 ```
 
-Judge endpoints:
+Required endpoints:
 
-```
+```text
 /v1/context
 /v1/tick
 /v1/reply
 /v1/healthz
 /v1/metadata
+```
+
+Render environment variables:
+
+```text
+COMPOSER_MODE=llm
+REPLY_MODE=llm
+GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_API_KEY=<set as Render secret>
+```
+
+Start command:
+
+```text
+uvicorn bot:app --host 0.0.0.0 --port $PORT
 ```
 
 ---
 
 # Tradeoffs
 
-## Advantages
+## Strengths
 
-- Fast deterministic responses
-- Reduced hallucination risk
-- Easy debugging
-- Stable evaluation behavior
+- Robust API contract
+- Strong deterministic fallback
+- Optional LLM intelligence
+- Low hallucination risk through prompt and rule guardrails
+- Handles auto-replies, intent transitions, hostility, waits, and repetition
+- `/tick` time budget reduces timeout risk
 
 ## Limitations
 
-- Less variation compared to fully template-driven conversational systems
-- Requires maintaining templates and conversation handlers
-
----
-
-# Future Improvements
-
-- Improved retrieval over context libraries
-- More category-specific conversation strategies
-- Long-term conversation memory
-- Enhanced trigger prioritization and response personalization
+- Runtime state is in memory and resets on restart
+- LLM quality depends on provider availability and API key configuration
+- Deterministic fallback replies are safer but less varied than full LLM output
 
 ---
 
@@ -310,6 +266,8 @@ Judge endpoints:
 - Python
 - FastAPI
 - Pydantic
-- JSON Context Storage
-- Rule-based Composer Engine
-- Conversation State Management
+- Uvicorn
+- Groq / Llama 3.3 70B optional LLM mode
+- Gemini/OpenAI optional fallback providers
+- In-memory context and conversation state
+- Rule-based + LLM hybrid composition
