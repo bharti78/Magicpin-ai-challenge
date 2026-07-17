@@ -271,20 +271,36 @@ async def reply(body: ReplyBody):
         conversations[body.conversation_id] = state
 
     result = respond(state, body.message)
-    print("DEBUG RESULT:", result)
     if result.get("action") == "send":
-        print("DEBUG SEND BODY:", result["body"])
         body_text = result.get("body", "")
         if body_text in state.sent_bodies:
-            result = {
-                "action": "end",
-                "rationale": "Avoiding verbatim repetition in conversation",
-            }
+            body_text = (
+                "Understood. I will avoid repeating the same note: the next step is for me "
+                "to prepare the draft/update from your profile data and share it for your approval. "
+                "Reply YES to continue."
+            )
+            if body_text in state.sent_bodies:
+                result = {
+                    "action": "end",
+                    "rationale": "Avoiding verbatim repetition in conversation",
+                }
+            else:
+                result = {
+                    "action": "send",
+                    "body": body_text,
+                    "cta": result.get("cta", "yes_stop"),
+                    "rationale": "Replaced duplicate candidate with a concrete non-repeating next step",
+                }
+                state.last_bot_body = body_text
+                state.sent_bodies.append(body_text)
+                state.turns.append({"from": "vera", "body": body_text})
         else:
             state.last_bot_body = body_text
             state.sent_bodies.append(body_text)
+            state.turns.append({"from": "vera", "body": body_text})
 
     if result.get("action") == "end":
+        state.ended = True
         prefix = f"conv_{body.merchant_id}_"
         active_conversations.difference_update({k for k in active_conversations if k.startswith(prefix)})
 

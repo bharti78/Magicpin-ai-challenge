@@ -51,6 +51,9 @@ class ConversationState:
     turns: list[dict[str, Any]] = field(default_factory=list)
     auto_reply_count: int = 0
     last_bot_body: str = ""
+    last_incoming_text: str = ""
+    repeat_count: int = 0
+    ended: bool = False
     sent_bodies: list[str] = field(default_factory=list)
 
 
@@ -77,12 +80,30 @@ def is_not_interested(message: str) -> bool:
 
 def respond(state: ConversationState, merchant_message: str) -> dict:
     """Produce the next bot action given conversation state and inbound message."""
+    if state.ended:
+        return {"action": "end", "rationale": "Conversation already ended"}
+
+    incoming = merchant_message.strip()
+    if state.last_incoming_text == incoming:
+        state.repeat_count += 1
+    else:
+        state.repeat_count = 0
+    state.last_incoming_text = incoming
+
     state.turns.append({"from": "merchant", "body": merchant_message})
 
     if is_hostile(merchant_message) or is_not_interested(merchant_message):
+        state.ended = True
         return {
             "action": "end",
             "rationale": "Merchant signaled stop / not interested — graceful exit",
+        }
+
+    if state.repeat_count >= 2:
+        state.ended = True
+        return {
+            "action": "end",
+            "rationale": "Same incoming message repeated 3+ times; treating as automated and exiting",
         }
 
     if is_auto_reply(merchant_message):
@@ -91,7 +112,8 @@ def respond(state: ConversationState, merchant_message: str) -> dict:
         if mid:
             merchant_auto_reply_count[mid] = merchant_auto_reply_count.get(mid, 0) + 1
         total = max(state.auto_reply_count, merchant_auto_reply_count.get(mid or "", 0))
-        if total >= 1:
+        if total >= 2:
+            state.ended = True
             return {
                 "action": "end",
                 "rationale": "Detected auto-reply pattern — exiting to avoid wasted turns",
@@ -108,6 +130,17 @@ def respond(state: ConversationState, merchant_message: str) -> dict:
         }
 
     if is_commitment(merchant_message):
+        if state.last_bot_body:
+            return {
+                "action": "send",
+                "body": (
+                    "Great - next step is simple: I will prepare the exact update or draft from "
+                    "your profile data and share it here for approval. Reply YES when you want "
+                    "me to proceed with the final version."
+                ),
+                "cta": "yes_stop",
+                "rationale": "Merchant confirmed intent again; giving a concrete next step without repeating",
+            }
         return {
             "action": "send",
             "body": (
