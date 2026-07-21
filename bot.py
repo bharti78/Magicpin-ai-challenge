@@ -15,7 +15,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 
 from composer import compose as compose_message
-from conversation_handlers import ConversationState, reset_merchant_tracking, respond
+from conversation_handlers import ConversationState, reset_merchant_tracking, respond, respond_customer
 
 app = FastAPI(title="Vera Challenge Bot")
 START = time.time()
@@ -27,6 +27,13 @@ contexts: dict[tuple[str, str], dict] = {}
 conversations: dict[str, ConversationState] = {}
 suppression_sent: set[str] = set()
 active_conversations: set[str] = set()
+
+
+def _limit_text(text: str, max_chars: int = 320) -> str:
+    clean = " ".join((text or "").strip().split())
+    if len(clean) <= max_chars:
+        return clean
+    return clean[: max_chars - 3].rsplit(" ", 1)[0] + "..."
 
 
 def _server_port() -> int:
@@ -297,15 +304,20 @@ async def reply(body: ReplyBody):
     if not category and trigger:
         category, merchant, trigger, customer = _resolve_contexts(trigger)
 
-    result = respond(state, body.message, category, merchant, trigger, customer)
+    if body.from_role.lower() == "customer":
+        result = respond_customer(state, body.message, category, merchant, trigger, customer)
+    else:
+        result = respond(state, body.message, category, merchant, trigger, customer)
     if result.get("action") == "send":
-        body_text = result.get("body", "")
+        body_text = _limit_text(result.get("body", ""))
+        result["body"] = body_text
         if body_text in state.sent_bodies:
             body_text = (
                 "Understood. I will avoid repeating the same note: the next step is for me "
                 "to prepare the draft/update from your profile data and share it for your approval. "
                 "Reply YES to continue."
             )
+            body_text = _limit_text(body_text)
             if body_text in state.sent_bodies:
                 result = {
                     "action": "end",

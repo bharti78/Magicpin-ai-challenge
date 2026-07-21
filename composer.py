@@ -78,8 +78,8 @@ def _finalize(result: dict, category: dict, merchant: dict, trigger: dict, custo
     if not body:
         result = _compose_generic(category, merchant, trigger, customer)
         body = result["body"]
-    if len(body) > 900:
-        body = body[:897].rsplit(" ", 1)[0] + "..."
+    if len(body) > 320:
+        body = body[:317].rsplit(" ", 1)[0] + "..."
         result["body"] = body
     result.setdefault("send_as", send_as(trigger, customer))
     result.setdefault("suppression_key", suppression_key(trigger))
@@ -561,6 +561,30 @@ def _compose_recall_due(category, merchant, trigger, customer) -> dict:
 
     time_note = f"It's been {months} months since your last visit — " if months else ""
     offer_note = f"{offer}. " if offer else ""
+    slug = category.get("slug", "")
+    services = _safe_get(customer, "relationship", "services_received", default=[]) or []
+    service = payload.get("service") or payload.get("recall_service") or (services[-1] if services else "")
+    if not service:
+        service = {
+            "dentists": "cleaning recall",
+            "gyms": "fitness follow-up",
+            "salons": "service follow-up",
+            "pharmacies": "refill follow-up",
+            "restaurants": "visit follow-up",
+        }.get(slug, "follow-up")
+
+    if hi:
+        body = (
+            f"Hi {name}, {biz} se - {time_note}aapka {service} due hai. "
+            f"{offer_note}Apke liye slots ready hain:{slot_text}"
+        )
+    else:
+        body = (
+            f"Hi {name}, {biz} here. {time_note}Your {service} is due. "
+            f"{offer_note}{slot_text.strip()}"
+        )
+    rationale = f"Recall due for {name} - category-aware service + slots"
+    return _base(body, "open_ended", rationale, category, merchant, trigger, customer)
 
     if hi:
         body = (
@@ -612,6 +636,22 @@ def _compose_chronic_refill(category, merchant, trigger, customer) -> dict:
     due = payload.get("stock_runs_out_iso", payload.get("refill_due_date", payload.get("due_date", "")))[:10]
     delivery = payload.get("delivery_address_saved", False)
     hi = uses_hindi(merchant, customer)
+    slug = category.get("slug", "")
+
+    if slug != "pharmacies" and not molecules and not payload.get("medication") and not payload.get("product"):
+        offer = first_active_offer(merchant, category)
+        offer_note = f" {offer} available." if offer else ""
+        if hi:
+            body = (
+                f"Hi {name}, {biz} se - aapka {med} due hai.{offer_note} "
+                "Follow-up slot chahiye? YES reply karein."
+            )
+        else:
+            body = (
+                f"Hi {name}, {biz} here - your {med} is due.{offer_note} "
+                "Need a follow-up slot? Reply YES."
+            )
+        return _base(body, "yes_stop", f"Non-pharmacy follow-up reminder for {med}", category, merchant, trigger, customer)
 
     due_note = f" Stock runs out by {due}." if due else ""
     delivery_note = " Saved address pe delivery." if delivery else ""
